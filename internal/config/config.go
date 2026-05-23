@@ -1,51 +1,59 @@
+// Package config provides configuration types and validation for logslice.
 package config
 
 import (
 	"errors"
 	"time"
+
+	"github.com/yourorg/logslice/internal/parser"
 )
 
-// Format represents the output format for log lines.
+// Format represents an output format for matched log lines.
 type Format string
 
 const (
-	FormatRaw   Format = "raw"
-	FormatJSON  Format = "json"
-	FormatCount Format = "count"
+	FormatRaw  Format = "raw"
+	FormatJSON Format = "json"
 )
 
 // Config holds all runtime configuration for a logslice run.
 type Config struct {
-	InputFile   string
-	OutputFile  string
-	Start       *time.Time
-	End         *time.Time
-	Pattern     string
-	OutputFmt   Format
-	TimeFmt     string
-	ShowSummary bool
+	Input   string
+	Output  string
+	Start   time.Time
+	End     time.Time
+	Pattern string
+	Format  Format
+	Tail    bool
+	PollMs  int
 }
 
-// Validate checks that the configuration is valid and consistent.
+// Validate checks that the Config is well-formed and applies defaults.
 func (c *Config) Validate() error {
-	if c.InputFile == "" {
+	if c.Input == "" {
 		return errors.New("input file is required")
 	}
-	if c.Start != nil && c.End != nil && c.End.Before(*c.Start) {
+	if !c.End.IsZero() && !c.Start.IsZero() && c.End.Before(c.Start) {
 		return errors.New("end time must be after start time")
 	}
-	switch c.OutputFmt {
-	case FormatRaw, FormatJSON, FormatCount:
-		// valid
-	case "":
-		c.OutputFmt = FormatRaw
-	default:
-		return errors.New("unsupported output format: " + string(c.OutputFmt))
+	if c.Format == "" {
+		c.Format = FormatRaw
+	}
+	if c.Format != FormatRaw && c.Format != FormatJSON {
+		return errors.New("format must be \"raw\" or \"json\"")
+	}
+	if c.Tail && c.PollMs <= 0 {
+		c.PollMs = 100
+	}
+	if c.Pattern != "" {
+		if _, err := parser.CompilePattern(c.Pattern); err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
-// HasTimeRange returns true if at least one time bound is set.
-func (c *Config) HasTimeRange() bool {
-	return c.Start != nil || c.End != nil
+// PollDuration returns the polling interval as a time.Duration.
+func (c *Config) PollDuration() time.Duration {
+	return time.Duration(c.PollMs) * time.Millisecond
 }
